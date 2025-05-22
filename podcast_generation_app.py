@@ -16,7 +16,7 @@ OPENAI_API_KEY =  os.getenv("OPENAI_API_KEY")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 
 MALE_VOICES = [
-    "YmpzixbkOaQ7t3lmyaRe",
+    "iP95p4xoKVk53GoZ742B",
     "wViXBPUzp2ZZixB1xQuM",
     "TxGEqnHWrfWFTfGW9XjX"
 ]
