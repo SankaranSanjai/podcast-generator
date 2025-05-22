@@ -91,13 +91,19 @@ def generate_podcast_script(topic: str, duration_minutes: int, setting: str, cha
         for char in characters
     ])
 
-    prompt = f"""Create a {duration_minutes }-minute podcast script about {topic} with a word per minute of 400.
-    Setting: {setting}
-    Participants:
-    {character_descriptions}
-    Include natural conversation flow with interruptions and humor.
-    Add a rapid-fire round in the last third.
-    NO stage directions or annotations - dialogue only. Eg: avoid words like (laughs), (chuckling) etc in brackets."""
+    prompt = f"""Create a {duration_minutes}-minute podcast script about {topic} with a word per minute of 400.  
+Setting: {setting}  
+Participants:  
+{character_descriptions}  
+
+- **Dialogue-only format**: No stage directions, annotations, or actions in brackets (e.g., avoid *(laughs)*, *(sighs)*).  
+- **Natural flow**: Use interruptions, humor, and organic reactions within the dialogue itself (e.g., "That’s hilarious!" instead of *(laughs)*).  
+- **Rapid-fire round**: Include in the last third with quick, playful exchanges.  
+- **Tone**: Keep it conversational and engaging, as if the speakers are reacting in real time.  
+
+Example of desired style:  
+Lina: "A fake Rolex is like wearing a fake mustache—it just doesn’t work!"  
+Leng: "I’m wheezing! So true."  """
 
     try:
         response = openai.chat.completions.create(
