@@ -322,7 +322,7 @@ def main():
         st.session_state.podbean_access_token = None
 
     # Handle OAuth callback
-    query_params = st.experimental_get_query_params()
+    query_params = st_query_params()
     if "code" in query_params and not st.session_state.podbean_access_token:
         with st.spinner("Authenticating with Podbean..."):
             st.session_state.podbean_access_token = get_podbean_access_token(query_params["code"][0])
