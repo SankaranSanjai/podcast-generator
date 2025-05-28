@@ -34,11 +34,13 @@ FEMALE_VOICES = [
     "AZnzlk1XvdvUeBnXmlld"
 ]
 
+
 # ======================
 # Utility Functions
 # ======================
 
 def cleanup_temp_files(output_folder="audio_clips"):
+    """Clean up temporary audio files"""
     if not os.path.exists(output_folder):
         return
 
@@ -50,11 +52,13 @@ def cleanup_temp_files(output_folder="audio_clips"):
             except Exception as e:
                 st.warning(f"Could not delete {filename}: {str(e)}")
 
+
 # ======================
 # Podcast Generation
 # ======================
 
 def get_character_info(num_speakers):
+    """Get character details from user input"""
     characters = []
     for i in range(num_speakers):
         with st.expander(f"Speaker {i + 1} Details", expanded=(i == 0)):
@@ -63,7 +67,8 @@ def get_character_info(num_speakers):
             gender = cols[1].selectbox("Gender", ["male", "female"], key=f"gender_{i}")
             profession = cols[2].text_input("Profession", key=f"prof_{i}", placeholder="e.g. Host, Engineer")
             background = st.text_input("Background", key=f"bg_{i}", placeholder="e.g. City, Education, Hobbies")
-            personality = st.text_input("Personality Traits", key=f"personality_{i}", placeholder="e.g. Funny, Curious, Sarcastic")
+            personality = st.text_input("Personality Traits", key=f"personality_{i}",
+                                        placeholder="e.g. Funny, Curious, Sarcastic")
 
             if not name:
                 st.warning("Please enter a name for this speaker")
@@ -78,7 +83,9 @@ def get_character_info(num_speakers):
             })
     return characters
 
+
 def assign_voices_to_characters(characters):
+    """Assign unique voices to each character"""
     voice_mapping = {}
     used_voices = set()
     assignments = []
@@ -99,31 +106,37 @@ def assign_voices_to_characters(characters):
 
     return voice_mapping, assignments
 
+
 def generate_podcast_script(topic: str, duration_minutes: int, setting: str, characters: list):
+    """Generate podcast script using OpenAI"""
     character_descriptions = "\n".join([
         f"- {char['name']} ({char['gender']}), {char['profession']} from {char['background']}, {char['personality']}"
         for char in characters
     ])
 
-    prompt = f"""Create a {duration_minutes}-minute podcast script about {topic} with a word per minute of 400.  
+    prompt = f"""Create a {duration_minutes}-minute podcast script about {topic} with about 150 words per minute.  
 Setting: {setting}  
 Participants:  
 {character_descriptions}  
 
-- **Dialogue-only format**: No stage directions, annotations, or actions in brackets (e.g., avoid *(laughs)*, *(sighs)*).  
-- **Natural flow**: Use interruptions, humor, and organic reactions within the dialogue itself (e.g., "That's hilarious!" instead of *(laughs)*).  
-- **Rapid-fire round**: Include in the last third with quick, playful exchanges.  
-- **Tone**: Keep it conversational and engaging, as if the speakers are reacting in real time.  
+Format Requirements:
+- Dialogue-only format (no narration or stage directions)
+- Natural conversational flow with interruptions
+- Include a rapid-fire question round in the last third
+- Each speaker should have distinct personality shining through
+- End with a memorable closing line
 
-Example of desired style:  
-Lina: "A fake Rolex is like wearing a fake mustache—it just doesn't work!"  
-Leng: "I'm wheezing! So true."  """
+Example Style:
+Alex: "I can't believe you think pineapple belongs on pizza!"
+Jamie: "Oh come on, it's the perfect sweet and savory combo!"
+Taylor: "You're both wrong - the real crime is no pineapple!" """
 
     try:
         response = openai.ChatCompletion.create(
             model="gpt-4",
             messages=[
-                {"role": "system", "content": "You are a professional podcast writer."},
+                {"role": "system",
+                 "content": "You are a professional podcast writer. Create engaging, natural-sounding dialogue."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7,
@@ -134,11 +147,14 @@ Leng: "I'm wheezing! So true."  """
         st.error(f"Script generation failed: {str(e)}")
         return None
 
+
 def extract_and_generate_audio(script: str, voice_mapping: dict):
+    """Generate audio clips for each line of dialogue"""
     output_folder = "audio_clips"
     os.makedirs(output_folder, exist_ok=True)
 
-    lines = re.findall(r"([A-Za-z ]+):\s*(.+)", script)
+    # Improved regex to handle various name formats and punctuation
+    lines = re.findall(r"^([A-Za-z][A-Za-z\s]+?):\s*([^\n]+)", script, re.MULTILINE)
     if not lines:
         st.error("No dialogue lines found in script!")
         return False
@@ -150,7 +166,7 @@ def extract_and_generate_audio(script: str, voice_mapping: dict):
     for idx, (speaker, line) in enumerate(lines):
         progress = (idx + 1) / len(lines)
         progress_bar.progress(progress)
-        status_text.text(f"Generating audio for {speaker}...")
+        status_text.text(f"Generating audio for {speaker.strip()}...")
 
         first_name = speaker.strip().split()[0].lower()
         voice_id = voice_mapping.get(first_name)
@@ -158,17 +174,22 @@ def extract_and_generate_audio(script: str, voice_mapping: dict):
             st.warning(f"No voice assigned for speaker: {speaker}")
             continue
 
-        filename = os.path.join(output_folder, f"{idx + 1:03d}_{speaker}.mp3")
+        filename = os.path.join(output_folder, f"{idx + 1:03d}_{speaker.strip()}.mp3")
 
-        for attempt in range(3):
+        for attempt in range(3):  # Retry up to 3 times
             try:
                 response = requests.post(
                     f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
                     headers={"xi-api-key": ELEVENLABS_API_KEY},
                     json={
-                        "text": line,
+                        "text": line.strip(),
                         "model_id": "eleven_multilingual_v2",
-                        "voice_settings": {"stability": 0.7, "similarity_boost": 0.8}
+                        "voice_settings": {
+                            "stability": 0.7,
+                            "similarity_boost": 0.8,
+                            "style": 0.5,
+                            "speaker_boost": True
+                        }
                     },
                     timeout=30
                 )
@@ -179,10 +200,10 @@ def extract_and_generate_audio(script: str, voice_mapping: dict):
                     generated_files.append(filename)
                     break
                 else:
-                    st.warning(f"Attempt {attempt + 1} failed for {speaker}")
+                    st.warning(f"Attempt {attempt + 1} failed for {speaker}: {response.text}")
             except Exception as e:
                 st.warning(f"Attempt {attempt + 1} error: {str(e)}")
-                time.sleep(2)
+                time.sleep(2)  # Wait before retrying
 
     progress_bar.empty()
     status_text.empty()
@@ -193,7 +214,9 @@ def extract_and_generate_audio(script: str, voice_mapping: dict):
 
     return True
 
+
 def combine_audio_clips_ffmpeg():
+    """Combine all audio clips into final podcast"""
     output_folder = "audio_clips"
     list_file = os.path.join(output_folder, "files.txt")
     final_output = os.path.join(output_folder, "final_podcast.mp3")
@@ -201,21 +224,28 @@ def combine_audio_clips_ffmpeg():
     if os.path.exists(final_output):
         os.remove(final_output)
 
-    mp3_files = sorted([f for f in os.listdir(output_folder)
-                        if f.endswith(".mp3") and f != "final_podcast.mp3"])
+    # Get all MP3 files except the final output
+    mp3_files = sorted(
+        [f for f in os.listdir(output_folder)
+         if f.endswith(".mp3") and f != "final_podcast.mp3"],
+        key=lambda x: int(x.split("_")[0])
 
     if not mp3_files:
         st.error("No audio clips found to combine!")
-        return False
+    return False
 
+    # Create input file for ffmpeg
     with open(list_file, "w") as f:
         for file in mp3_files:
             f.write(f"file '{file}'\n")
 
     try:
+        # Use ffmpeg to concatenate files
         result = subprocess.run(
-            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "files.txt",
-             "-c", "copy", "final_podcast.mp3"],
+            [
+                "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                "-i", "files.txt", "-c", "copy", "final_podcast.mp3"
+            ],
             cwd=output_folder,
             capture_output=True,
             text=True
@@ -229,6 +259,23 @@ def combine_audio_clips_ffmpeg():
             st.error("Final podcast file was not created")
             return False
 
+        # Add metadata
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-i", "final_podcast.mp3",
+                "-metadata", "title=AI Generated Podcast",
+                "-metadata", "artist=AI Podcast Generator",
+                "-c", "copy", "final_podcast_with_metadata.mp3"
+            ],
+            cwd=output_folder
+        )
+
+        # Replace original with metadata version
+        os.replace(
+            os.path.join(output_folder, "final_podcast_with_metadata.mp3"),
+            final_output
+        )
+
         cleanup_temp_files()
         return True
 
@@ -236,19 +283,24 @@ def combine_audio_clips_ffmpeg():
         st.error(f"Error combining audio: {str(e)}")
         return False
 
+
 # ======================
 # Podbean Integration
 # ======================
 
 def get_podbean_auth_url():
+    """Generate Podbean OAuth authorization URL"""
     params = {
         "client_id": PODBEAN_CLIENT_ID,
         "redirect_uri": PODBEAN_REDIRECT_URI,
-        "response_type": "code"
+        "response_type": "code",
+        "scope": "podcast_upload"
     }
     return f"https://api.podbean.com/v1/oauth/authorize?{urllib.parse.urlencode(params)}"
 
+
 def get_podbean_access_token(auth_code):
+    """Exchange authorization code for access token"""
     auth_string = f"{PODBEAN_CLIENT_ID}:{PODBEAN_CLIENT_SECRET}"
     auth_bytes = auth_string.encode("ascii")
     auth_base64 = base64.b64encode(auth_bytes).decode("ascii")
@@ -268,15 +320,20 @@ def get_podbean_access_token(auth_code):
         response = requests.post(
             "https://api.podbean.com/v1/oauth/token",
             headers=headers,
-            data=data
+            data=data,
+            timeout=30
         )
         response.raise_for_status()
         return response.json().get("access_token")
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         st.error(f"Failed to get Podbean access token: {str(e)}")
+        if response:
+            st.error(f"Response: {response.text}")
         return None
 
-def upload_to_podbean(file_path, title, description="AI-generated podcast"):
+
+def upload_to_podbean(file_path, title, description):
+    """Upload podcast episode to Podbean"""
     if "podbean_access_token" not in st.session_state:
         st.error("Not authenticated with Podbean!")
         return False
@@ -288,31 +345,44 @@ def upload_to_podbean(file_path, title, description="AI-generated podcast"):
                 "title": (None, title),
                 "description": (None, description),
                 "content_type": (None, "episode"),
-                "status": (None, "publish")
+                "status": (None, "publish"),  # Change to "draft" if you want to review first
+                "logo": (None, ""),  # Can add cover image here if needed
+                "explicit": (None, "no")
             }
 
             response = requests.post(
                 "https://api.podbean.com/v1/episodes",
                 headers={"Authorization": f"Bearer {st.session_state.podbean_access_token}"},
-                files=files
+                files=files,
+                timeout=60  # Longer timeout for large files
             )
 
             if response.status_code == 200:
                 return True
             else:
-                st.error(f"Podbean upload failed: {response.text}")
+                st.error(f"Podbean upload failed (Status {response.status_code}): {response.text}")
                 return False
     except Exception as e:
         st.error(f"Error uploading to Podbean: {str(e)}")
         return False
+
 
 # ======================
 # Main App
 # ======================
 
 def main():
-    st.set_page_config(page_title="AI Podcast Generator", layout="wide")
-    st.title("🎧 AI Podcast Generator")
+    st.set_page_config(
+        page_title="AI Podcast Generator",
+        layout="wide",
+        menu_items={
+            'Get Help': 'https://github.com/your-repo',
+            'Report a bug': "https://github.com/your-repo/issues",
+            'About': "# AI Podcast Generator with Podbean Upload"
+        }
+    )
+
+    st.title("🎙️ AI Podcast Generator with Podbean Upload")
     st.markdown("---")
 
     # Initialize session state
@@ -320,33 +390,60 @@ def main():
         st.session_state.podcast_ready = False
     if "podbean_access_token" not in st.session_state:
         st.session_state.podbean_access_token = None
+    if "podbean_authenticated" not in st.session_state:
+        st.session_state.podbean_authenticated = False
 
     # Handle OAuth callback
-    query_params = st_query_params()
-    if "code" in query_params and not st.session_state.podbean_access_token:
+    query_params = st.experimental_get_query_params()
+    if "code" in query_params and not st.session_state.podbean_authenticated:
         with st.spinner("Authenticating with Podbean..."):
-            st.session_state.podbean_access_token = get_podbean_access_token(query_params["code"][0])
-            if st.session_state.podbean_access_token:
+            access_token = get_podbean_access_token(query_params["code"][0])
+            if access_token:
+                st.session_state.podbean_access_token = access_token
+                st.session_state.podbean_authenticated = True
                 st.success("✅ Successfully authenticated with Podbean!")
                 # Clear the code from URL
                 st.experimental_set_query_params()
+                time.sleep(2)
+                st.rerun()
+            else:
+                st.error("Failed to authenticate with Podbean")
+
+    # Authentication section
+    if not st.session_state.podbean_authenticated:
+        st.warning("Please authenticate with Podbean to enable uploads")
+        auth_url = get_podbean_auth_url()
+        st.markdown(f"""
+        ### Podbean Authentication Required
+        1. [Click here to authenticate with Podbean]({auth_url})
+        2. You'll be redirected back to this app after login
+        """)
+        st.stop()
 
     # Podcast settings sidebar
     with st.sidebar:
         st.header("Podcast Settings")
-        topic = st.text_input("Main Topic", placeholder="e.g. Future of AI")
-        duration = st.slider("Duration (minutes)", 5, 30)
-        setting = st.text_area("Environment/Setting", placeholder="e.g. Casual coffee shop setting")
-        num_speakers = st.number_input("Number of Speakers", 1, 5, 2)
+        topic = st.text_input("Main Topic", placeholder="e.g. Future of AI", key="topic")
+        duration = st.slider("Duration (minutes)", 5, 60, 20, key="duration")
+        setting = st.text_area("Environment/Setting",
+                               placeholder="e.g. Casual coffee shop setting",
+                               key="setting")
+        num_speakers = st.number_input("Number of Speakers", 1, 5, 2, key="num_speakers")
 
-    # Authentication section
-    if not st.session_state.podbean_access_token:
-        st.warning("Please authenticate with Podbean to enable uploads")
-        auth_url = get_podbean_auth_url()
-        st.markdown(f"[Click here to authenticate with Podbean]({auth_url})")
-        st.stop()
+        st.markdown("---")
+        st.header("Advanced Options")
+        st.checkbox("Add intro/outro music", value=False, key="add_music")
+        st.checkbox("Include ad breaks", value=False, key="include_ads")
 
-    # Podcast generation
+        st.markdown("---")
+        if st.button("🔒 Logout from Podbean"):
+            st.session_state.podbean_authenticated = False
+            st.session_state.podbean_access_token = None
+            st.success("Logged out successfully")
+            time.sleep(1)
+            st.rerun()
+
+    # Podcast generation main section
     st.header("Hosts & Guests")
     characters = get_character_info(num_speakers)
     if not characters:
@@ -357,14 +454,22 @@ def main():
             try:
                 st.write("🔊 Assigning Voices...")
                 voice_mapping, assignments = assign_voices_to_characters(characters)
+                st.session_state.voice_mapping = voice_mapping
+                st.session_state.assignments = assignments
 
                 st.write("📝 Writing Script...")
-                script = generate_podcast_script(topic, duration, setting, characters)
+                script = generate_podcast_script(
+                    topic,
+                    duration,
+                    setting,
+                    characters
+                )
                 if not script:
                     st.stop()
 
                 st.session_state.script = script
-                st.session_state.assignments = assignments
+                with st.expander("View Script"):
+                    st.code(script)
 
                 st.write("🔈 Creating Audio Clips...")
                 if not extract_and_generate_audio(script, voice_mapping):
@@ -386,45 +491,8 @@ def main():
         st.markdown("---")
         st.header("Results")
 
-        with st.expander("📜 Show Podcast Script", expanded=True):
-            st.code(st.session_state.script, language="text")
+        col1, col2 = st.columns(2)
 
-        st.subheader("Voice Assignments")
-        for assignment in st.session_state.assignments:
-            st.info(f"🎙️ {assignment}")
-
-        st.subheader("Final Podcast")
-        audio_file = os.path.join("audio_clips", "final_podcast.mp3")
-
-        if os.path.exists(audio_file):
-            audio_bytes = open(audio_file, "rb").read()
-            st.audio(audio_bytes, format="audio/mp3")
-
-            st.download_button(
-                "⬇️ Download MP3",
-                data=audio_bytes,
-                file_name="ai_podcast.mp3",
-                mime="audio/mpeg",
-                use_container_width=True
-            )
-
-            # Podbean upload section
-            st.markdown("---")
-            st.header("Podbean Upload")
-            podcast_title = st.text_input("Podcast Title", value=f"AI Podcast: {topic}")
-            podcast_description = st.text_area("Description", value=st.session_state.script[:500] + "...")
-
-            if st.button("📤 Upload to Podbean", type="primary", use_container_width=True):
-                with st.spinner("Uploading to Podbean..."):
-                    if upload_to_podbean(audio_file, podcast_title, podcast_description):
-                        st.success("✅ Successfully uploaded to Podbean!")
-                        st.markdown(f"[View on Podbean](https://feed.podbean.com/sankaransanjai/feed.xml)")
-                    else:
-                        st.error("Failed to upload to Podbean")
-        else:
-            st.error("Final podcast file not found. Please regenerate.")
-
-if __name__ == "__main__":
-    if os.path.exists("audio_clips"):
-        cleanup_temp_files()
-    main()
+        with col1:
+            with st.expander("📜 Podcast Script", expanded=True):
+                st.code(st.session_state.script, language="text
