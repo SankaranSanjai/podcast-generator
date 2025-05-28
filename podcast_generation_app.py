@@ -8,13 +8,20 @@ import os
 import subprocess
 from io import BytesIO
 from dotenv import load_dotenv
+import base64
+import urllib.parse
 
-
+# Load environment variables
 load_dotenv()
 
-OPENAI_API_KEY =  os.getenv("OPENAI_API_KEY")
+# API Keys
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+PODBEAN_CLIENT_ID = os.getenv("PODBEAN_CLIENT_ID")
+PODBEAN_CLIENT_SECRET = os.getenv("PODBEAN_CLIENT_SECRET")
+PODBEAN_REDIRECT_URI = os.getenv("PODBEAN_REDIRECT_URI", "http://localhost:8501")
 
+# Voice IDs
 MALE_VOICES = [
     "iP95p4xoKVk53GoZ742B",
     "wViXBPUzp2ZZixB1xQuM",
@@ -27,8 +34,11 @@ FEMALE_VOICES = [
     "AZnzlk1XvdvUeBnXmlld"
 ]
 
-def cleanup_temp_files(output_folder="audio_clips"):
+# ======================
+# Utility Functions
+# ======================
 
+def cleanup_temp_files(output_folder="audio_clips"):
     if not os.path.exists(output_folder):
         return
 
@@ -40,13 +50,17 @@ def cleanup_temp_files(output_folder="audio_clips"):
             except Exception as e:
                 st.warning(f"Could not delete {filename}: {str(e)}")
 
+# ======================
+# Podcast Generation
+# ======================
+
 def get_character_info(num_speakers):
     characters = []
     for i in range(num_speakers):
         with st.expander(f"Speaker {i + 1} Details", expanded=(i == 0)):
             cols = st.columns([2, 1, 2])
             name = cols[0].text_input("Full Name", key=f"name_{i}", placeholder="e.g. John, Joe")
-            gender = cols[1].selectbox("Gender", ["male", "female"], key=f"gender_{i}" )
+            gender = cols[1].selectbox("Gender", ["male", "female"], key=f"gender_{i}")
             profession = cols[2].text_input("Profession", key=f"prof_{i}", placeholder="e.g. Host, Engineer")
             background = st.text_input("Background", key=f"bg_{i}", placeholder="e.g. City, Education, Hobbies")
             personality = st.text_input("Personality Traits", key=f"personality_{i}", placeholder="e.g. Funny, Curious, Sarcastic")
@@ -97,17 +111,17 @@ Participants:
 {character_descriptions}  
 
 - **Dialogue-only format**: No stage directions, annotations, or actions in brackets (e.g., avoid *(laughs)*, *(sighs)*).  
-- **Natural flow**: Use interruptions, humor, and organic reactions within the dialogue itself (e.g., "That’s hilarious!" instead of *(laughs)*).  
+- **Natural flow**: Use interruptions, humor, and organic reactions within the dialogue itself (e.g., "That's hilarious!" instead of *(laughs)*).  
 - **Rapid-fire round**: Include in the last third with quick, playful exchanges.  
 - **Tone**: Keep it conversational and engaging, as if the speakers are reacting in real time.  
 
 Example of desired style:  
-Lina: "A fake Rolex is like wearing a fake mustache—it just doesn’t work!"  
-Leng: "I’m wheezing! So true."  """
+Lina: "A fake Rolex is like wearing a fake mustache—it just doesn't work!"  
+Leng: "I'm wheezing! So true."  """
 
     try:
-        response = openai.chat.completions.create(
-            model="gpt-4o-mini",
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
             messages=[
                 {"role": "system", "content": "You are a professional podcast writer."},
                 {"role": "user", "content": prompt}
@@ -222,14 +236,102 @@ def combine_audio_clips_ffmpeg():
         st.error(f"Error combining audio: {str(e)}")
         return False
 
+# ======================
+# Podbean Integration
+# ======================
+
+def get_podbean_auth_url():
+    params = {
+        "client_id": PODBEAN_CLIENT_ID,
+        "redirect_uri": PODBEAN_REDIRECT_URI,
+        "response_type": "code"
+    }
+    return f"https://api.podbean.com/v1/oauth/authorize?{urllib.parse.urlencode(params)}"
+
+def get_podbean_access_token(auth_code):
+    auth_string = f"{PODBEAN_CLIENT_ID}:{PODBEAN_CLIENT_SECRET}"
+    auth_bytes = auth_string.encode("ascii")
+    auth_base64 = base64.b64encode(auth_bytes).decode("ascii")
+
+    headers = {
+        "Authorization": f"Basic {auth_base64}",
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+
+    data = {
+        "grant_type": "authorization_code",
+        "code": auth_code,
+        "redirect_uri": PODBEAN_REDIRECT_URI
+    }
+
+    try:
+        response = requests.post(
+            "https://api.podbean.com/v1/oauth/token",
+            headers=headers,
+            data=data
+        )
+        response.raise_for_status()
+        return response.json().get("access_token")
+    except Exception as e:
+        st.error(f"Failed to get Podbean access token: {str(e)}")
+        return None
+
+def upload_to_podbean(file_path, title, description="AI-generated podcast"):
+    if "podbean_access_token" not in st.session_state:
+        st.error("Not authenticated with Podbean!")
+        return False
+
+    try:
+        with open(file_path, "rb") as audio_file:
+            files = {
+                "file": (os.path.basename(file_path), audio_file, "audio/mpeg"),
+                "title": (None, title),
+                "description": (None, description),
+                "content_type": (None, "episode"),
+                "status": (None, "publish")
+            }
+
+            response = requests.post(
+                "https://api.podbean.com/v1/episodes",
+                headers={"Authorization": f"Bearer {st.session_state.podbean_access_token}"},
+                files=files
+            )
+
+            if response.status_code == 200:
+                return True
+            else:
+                st.error(f"Podbean upload failed: {response.text}")
+                return False
+    except Exception as e:
+        st.error(f"Error uploading to Podbean: {str(e)}")
+        return False
+
+# ======================
+# Main App
+# ======================
+
 def main():
     st.set_page_config(page_title="AI Podcast Generator", layout="wide")
     st.title("🎧 AI Podcast Generator")
     st.markdown("---")
 
+    # Initialize session state
     if "podcast_ready" not in st.session_state:
         st.session_state.podcast_ready = False
+    if "podbean_access_token" not in st.session_state:
+        st.session_state.podbean_access_token = None
 
+    # Handle OAuth callback
+    query_params = st.experimental_get_query_params()
+    if "code" in query_params and not st.session_state.podbean_access_token:
+        with st.spinner("Authenticating with Podbean..."):
+            st.session_state.podbean_access_token = get_podbean_access_token(query_params["code"][0])
+            if st.session_state.podbean_access_token:
+                st.success("✅ Successfully authenticated with Podbean!")
+                # Clear the code from URL
+                st.experimental_set_query_params()
+
+    # Podcast settings sidebar
     with st.sidebar:
         st.header("Podcast Settings")
         topic = st.text_input("Main Topic", placeholder="e.g. Future of AI")
@@ -237,6 +339,14 @@ def main():
         setting = st.text_area("Environment/Setting", placeholder="e.g. Casual coffee shop setting")
         num_speakers = st.number_input("Number of Speakers", 1, 5, 2)
 
+    # Authentication section
+    if not st.session_state.podbean_access_token:
+        st.warning("Please authenticate with Podbean to enable uploads")
+        auth_url = get_podbean_auth_url()
+        st.markdown(f"[Click here to authenticate with Podbean]({auth_url})")
+        st.stop()
+
+    # Podcast generation
     st.header("Hosts & Guests")
     characters = get_character_info(num_speakers)
     if not characters:
@@ -271,6 +381,7 @@ def main():
                 st.error(f"Generation failed: {str(e)}")
                 st.stop()
 
+    # Results section
     if st.session_state.get("podcast_ready"):
         st.markdown("---")
         st.header("Results")
@@ -296,9 +407,22 @@ def main():
                 mime="audio/mpeg",
                 use_container_width=True
             )
+
+            # Podbean upload section
+            st.markdown("---")
+            st.header("Podbean Upload")
+            podcast_title = st.text_input("Podcast Title", value=f"AI Podcast: {topic}")
+            podcast_description = st.text_area("Description", value=st.session_state.script[:500] + "...")
+
+            if st.button("📤 Upload to Podbean", type="primary", use_container_width=True):
+                with st.spinner("Uploading to Podbean..."):
+                    if upload_to_podbean(audio_file, podcast_title, podcast_description):
+                        st.success("✅ Successfully uploaded to Podbean!")
+                        st.markdown(f"[View on Podbean](https://feed.podbean.com/sankaransanjai/feed.xml)")
+                    else:
+                        st.error("Failed to upload to Podbean")
         else:
             st.error("Final podcast file not found. Please regenerate.")
-
 
 if __name__ == "__main__":
     if os.path.exists("audio_clips"):
