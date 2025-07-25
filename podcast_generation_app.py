@@ -6,7 +6,6 @@ import random
 import re
 import os
 import subprocess
-from io import BytesIO
 from dotenv import load_dotenv
 
 
